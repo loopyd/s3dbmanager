@@ -86,7 +86,7 @@ while [ : ]; do
         shift 2
         ;;
     -x | --s3username)
-        S3_USERNAME="$2"
+        S3_USER="$2"
         shift 2
         ;;
     -a | --s3accesskey)
@@ -102,7 +102,7 @@ while [ : ]; do
         shift 2
         ;;
     -w | --retentiondays)
-        RETENTION_DAYS="$2"
+        S3_RETENTION_DAYS="$2"
         shift 2
         ;;
     -t | --date)
@@ -110,7 +110,7 @@ while [ : ]; do
         shift 2
         ;;
     -i | --interval)
-        WAIT_SECONDS="$2"
+        DAEMON_WAIT_SECONDS="$2"
         shift 2
         ;;
     -c | --keep)
@@ -179,10 +179,10 @@ if [ -z "$S3_REGION" ]; then
 else
     S3CMD_PARAMS="--region=\"${S3_REGION}\" ${S3CMD_PARAMS}"
 fi
-if [ -z "$S3_USERNAME" ]; then
-    echo "-x | --s3username: S3_USERNAME option not specified, username will default to NONE" >&2
+if [ -z "$S3_USER" ]; then
+    echo "-x | --s3username: S3_USER option not specified, username will default to NONE" >&2
 else
-    S3CMD_PARAMS="--user=\"${S3_USERNAME}\" ${S3CMD_PARAMS}"
+    S3CMD_PARAMS="--user=\"${S3_USER}\" ${S3CMD_PARAMS}"
 fi
 if [ -z "$S3_ACCESSKEY" ]; then
     echo "-a | --s3accesskey: S3_ACCESSKEY option required" >&2
@@ -200,24 +200,24 @@ if [ -z "$OPERATION" ]; then
     echo "-s | --operation: OPERATION option required" >&2
     exit 1
 fi
-if [ -z "$RETENTION_DAYS" ] && [ "$OPERATION" == "setlifecycle" ]; then
-    echo "-s | --operation: OPERATION=setlifecycle requires RETENTION_DAYS option" >&2
-    exit 1
+if [ -z "$S3_RETENTION_DAYS" ] && [ "$OPERATION" == "setlifecycle" ]; then
+    echo "-w | --retentiondays: OPERATION=setlifecycle requires RETENTION_DAYS option, it has defaulted to 7 days" >&2
+    S3_RETENTION_DAYS="7"
 fi
 if [ -z "$MYDATE" ] && [ "$OPERATION" == "backup" ]; then
-    echo "-s | --operation: OPERATION=backup requires DATE option, it has defaulted to NOW" >&2
-    MYDATE="$(date '+%Y%m%d-%H%M%S')"
+    echo "-t | --date: OPERATION=backup requires DATE option, it has defaulted to NOW" >&2
+    MYDATE="$(date '+%Y%m%d-%H%M')"
 fi
 if [ -z "$MYDATE" ] && [ "$OPERATION" == "restore" ]; then
-    echo "-s | --operation: OPERATION=restore requires DATE option, it has defaulted to NOW" >&2
+    echo "-t | --date: OPERATION=restore requires MYDATE option, it has defaulted to NOW" >&2
     MYDATE="$(date '+%Y%m%d-%H%M%S')"
 fi
-if [ -z "$WAIT_SECONDS" ] && [ "$OPERATION" == "daemonize" ]; then
-    echo "-s | --operation: OPERATION=daemonize requires INTERVAL option, it has defaulted to 3600 seconds (1 hour)" >&2
-    WAIT_SECONDS="3600"
+if [ -z "$DAEMON_WAIT_SECONDS" ] && [ "$OPERATION" == "daemonize" ]; then
+    echo "-i | --interval: OPERATION=daemonize requires DAEMON_WAIT_SECONDS option, it has defaulted to 3600 seconds (1 hour)" >&2
+    DAEMON_WAIT_SECONDS="3600"
 fi
-if [ -z "$KEEP" ] && [ "$OPERATION" == "rotate" ]; then
-    echo "-s | --operation: OPERATION=rotate requires KEEP option, it has defaulted to 14" >&2
+if [ -z "$S3_KEEP" ] && [ "$OPERATION" == "rotate" ]; then
+    echo "-c | --keep: OPERATION=rotate requires S3_KEEP option, it has defaulted to 14 backups" >&2
     S3_KEEP="14"
 fi
 
@@ -236,7 +236,7 @@ dosetlifecycle() {
 		<Prefix/>
 		<Status>Enabled</Status>
 		<Expiration>
-			<Days>${RETENTION_DAYS}</Days>
+			<Days>${S3_RETENTION_DAYS}</Days>
 		</Expiration>
     <AbortIncompleteMultipartUpload>
       <DaysAfterInitiation>1</DaysAfterInitiation>
@@ -267,11 +267,11 @@ dorotate() {
     return
 }
 
-# The function runs a backup daemon in the foreground at WAIT_SECONDS interval.
+# The function runs a backup daemon in the foreground at DAEMON_WAIT_SECONDS interval.
 dobackupdaemon() {
     while true; do
-        echo "Daemon is waiting $WAIT_SECONDS seconds until next backup..."
-        sleep "$WAIT_SECONDS"
+        echo "Daemon is waiting ${DAEMON_WAIT_SECONDS} seconds until next backup..."
+        sleep "${DAEMON_WAIT_SECONDS}s"
         dobackup
     done
     return
