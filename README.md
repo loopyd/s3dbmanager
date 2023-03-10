@@ -28,7 +28,7 @@ You have this table to reference for command line options.  You can also run ``-
 * **Description** - The description of the argument's funciton
 
 | Short | Long | Optional | Environment | Description |
-| ----- | ---- | ---- | ---- |
+| ----- | ---- | ---- | ---- | ---- |
 | ``-h`` | ``--help`` | **YES** | N/A | Just displays the usage and some program information |
 | ``-o`` | ``--operation`` | **NO** | ``OPERATION`` | The operation to perform, see below for a complete list of these options |
 | ``-l`` | ``--host`` | **NO** | ``MYSQL_HOST`` | The MariaDB host to connect to |
