@@ -5,7 +5,7 @@
 #
 # Copyright (c) 2023 DeityDurg <https://www.deitydurg.net>
 
-# Install/ensure prerequisites
+# Setup work environment
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 WORK_DIR=$(mktemp -d -p "$DIR")
 if [[ ! "$WORK_DIR" || ! -d "$WORK_DIR" ]]; then
@@ -19,27 +19,6 @@ cleanup() {
   echo "Deleted temp working directory $WORK_DIR" >&2
 }
 trap cleanup EXIT
-if ! command -v s3cmd &> /dev/null; then
-    echo "s3cmd tool could not be found, it will be installed now" >&2
-    wget -qO- 'https://github.com/s3tools/s3cmd/releases/download/v2.3.0/s3cmd-2.3.0.tar.gz' | tar xz -C $WORK_DIR/ && cp -R $WORK_DIR/s3cmd-2.3.0/s3cmd $WORK_DIR/s3cmd-2.3.0/S3 /usr/local/bin
-    apt-get install python-dateutil -y
-    if command -v s3cmd &> /dev/null; then
-        echo "s3cmd tool installed successfully" >&2
-    else
-        echo "s3cmd tool failed to install successfully, please check the log" >&2
-        exit 1
-    fi
-fi
-if ! command -v lbzip2 &> /dev/null; then
-    echo "lbzip2 tool could not be found, it will be installed now" >&2
-    apt-get install lbzip2
-    if command -v lbzip2 &> /dev/null; then
-        echo "lbzip2 tool installed successfully" >&2
-    else
-        echo "lbzip2 tool failed to install successfully, please check the log" >&2
-        exit 1
-    fi
-fi
 
 # Parse command line arguments
 VALID_ARGS=$(getopt -o l:u:p:o:d:f:e:b:r:x:a:k:s:w:t:i:hc: --long host:,username:,password:,port:,databases:,tables:,s3endpoint:,s3bucket:,s3region:,s3username:,s3accesskey:,s3secretkey:,operation:,retentiondays:,date:,help,keep: -- "$@")
@@ -225,6 +204,69 @@ FILENAME="${MYDATE}.xb.bz2"
 S3CMD_PARAMS=$(echo ${S3CMD_PARAMS} | sed 's/^[ \t]*//;s/[ \t]*$//')
 MYSQL_PARAMS=$(echo ${MYSQL_PARAMS} | sed 's/^[ \t]*//;s/[ \t]*$//')
 
+# The function checks for required prerequisites and installs them if
+# nessecary.
+docheckprerequisites() {
+    if ! command -v g++ &> /dev/null; then
+        echo "c++ compiler is not installed, it will be installed now" >&2
+        apt-get install build-essential
+        if command -v gcc &> /dev/null; then
+            echo "installed the c++ compiler successfully" >&2
+        else
+            echo "c++ compiler failed to install, please check the log" >&2
+            exit 1
+        fi
+    fi
+    if ! command -v s3cmd &> /dev/null; then
+        echo "s3cmd tool could not be found, it will be installed now" >&2
+        wget -qO- 'https://github.com/s3tools/s3cmd/releases/download/v2.3.0/s3cmd-2.3.0.tar.gz' | tar xz -C ${WORK_DIR}/ && cp -R ${WORK_DIR}/s3cmd-2.3.0/s3cmd ${WORK_DIR}/s3cmd-2.3.0/S3 /usr/local/bin
+        apt-get install python-dateutil -y
+        if command -v s3cmd &> /dev/null; then
+            echo "s3cmd tool installed successfully" >&2
+        else
+            echo "s3cmd tool failed to install successfully, please check the log" >&2
+            exit 1
+        fi
+    fi
+    if ! command -v lbzip2 &> /dev/null; then
+        echo "lbzip2 tool could not be found, it will be installed now" >&2
+        apt-get install lbzip2
+        if command -v lbzip2 &> /dev/null; then
+            echo "lbzip2 tool installed successfully" >&2
+        else
+            echo "lbzip2 tool failed to install successfully, please check the log" >&2
+            exit 1
+        fi
+    fi
+    if ! command -v bsdtar &> /dev/null; then
+        echo "bsdtar tool could not be found, it will be installed now" >&2
+        apt-get install bsdtar -y
+        if command -v bsdtar &> /dev/null; then
+            echo "bsdtar tool installed successfully" >&2
+        else
+            echo "bsdtar tool failed to install successfully, please check the log" >&2
+            exit 1
+        fi  
+    fi
+    if ! command -v qpress &> /dev/null; then
+        echo "qpress tool could not be found, it will be installed now" >&2
+        wget -qO- 'https://github.com/PierreLvx/qpress/archive/refs/heads/master.zip' | bsdtar -xf- -C ${WORKDIR}/
+        pushd "${WORKDIR}/qpress-master" || exit 1
+        PREFIX=/usr/local/bin make -j$(nproc)
+        PREFIX=/usr/local/bin make install
+        popd || exit 1
+        rm -rf ${WORKDIR}/qpress-master
+        if command -v qpress &> /dev/null; then
+            echo "qpress tool installed successfully" >&2
+        else
+            echo "qpress tool failed to install successfully, please check the log" >&2
+            exit 1
+        fi
+        exit 1
+    fi
+    return
+}
+
 # The function sets the lifecycle policy of the s3 bucket.
 dosetlifecycle() {
     echo "Setting bucket lifecycle policy..."
@@ -285,7 +327,8 @@ dorestore() {
     systemctl start mysqld.service
 }
 
-# Run subcommand
+# Run run functions
+docheckprerequisites
 case "$OPERATION" in
     setlifecycle)
         dosetlifecycle

@@ -4,16 +4,27 @@
 
 This script backs up MariaDB to s3 bucket and back, with a lot of features in a portable design!
 
+## Benefits
+
+This script has some benefits over others:
+
+- Automatic dependency installing (s3cmd, libzip2, openssl and gpg are verified)
+- Automatic configuration of s3cmd with dotfile (``.s3localcfg``) in temporary directory based upon the command line arguments so each run can uniquely use different buckets and different endpoints/regions
+
 ## Caveouts
 
-This script has some limitations, for simplicity's sake:
+This script has some limitations:
 
+- currently only works on debian and ubuntu systems
+- doesn't work on old versions of MySQL (needs MariaDB)
 - does not support incremental backups (that have to construct the final from a master backup followed by the additional slave backups)
 - does not support partitioned table backup restore
 
 ## Shameless buttplug
 
 Maybe I might remove some of these limitations in the future, if it **GETS ENOUGH GITHUB STARS** (is well recieved by the community as a working solution).
+
+Some are feasable to do, like to offer support for CentOS and REHL.  I just want to see if its recieved well before I add major complexity.  If it is, you'll get delivered more features.
 
 ## Usage
 
