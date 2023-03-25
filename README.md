@@ -2,21 +2,20 @@
 
 ## Manage it in the draconic way!
 
-This script backs up MariaDB to s3 bucket and back, with a lot of features in a portable design!
+This script backs up MySQL to s3 bucket and back, with a lot of features in a portable design!
 
 ## Benefits
 
 This script has some benefits over others:
 
 - Automatic dependency installing (s3cmd, libzip2, openssl and gpg are verified)
-- Automatic configuration of s3cmd with dotfile (``.s3localcfg``) in temporary directory based upon the command line arguments so each run can uniquely use different buckets and different endpoints/regions
+- Backup encryption and backup compression with openssl
 
 ## Caveouts
 
 This script has some limitations:
 
 - currently only works on debian and ubuntu systems
-- doesn't work on old versions of MySQL (needs MariaDB)
 - does not support incremental backups (that have to construct the final from a master backup followed by the additional slave backups)
 - does not support partitioned table backup restore
 
@@ -42,9 +41,9 @@ You have this table to reference for command line options.  You can also run ``-
 | ----- | ---- | ---- | ---- | ---- |
 | ``-h`` | ``--help`` | **YES** | N/A | Just displays the usage and some program information |
 | ``-o`` | ``--operation`` | **NO** | ``OPERATION`` | The operation to perform, see below for a complete list of these options |
-| ``-l`` | ``--host`` | **NO** | ``MYSQL_HOST`` | The MariaDB host to connect to |
-| ``-u`` | ``--username`` | **NO** | ``MYSQL_USER`` | The MariaDB username to connect with |
-| ``-p`` | ``--password`` | **NO** | ``MYSQL_PASSWORD`` | The MariaDB password to connect with |
+| ``-l`` | ``--host`` | **NO** | ``MYSQL_HOST`` | The MySQL host to connect to |
+| ``-u`` | ``--username`` | **NO** | ``MYSQL_USER`` | The MySQL username to connect with |
+| ``-p`` | ``--password`` | **NO** | ``MYSQL_PASSWORD`` | The MySQL password to connect with |
 | ``-o`` | ``--port`` | **YES** | ``MYSQL_PORT`` | The port to connect to, if none specified it defaults to 3306 |  
 | ``-d`` | ``--databases`` | **YES** | ``MYSQL_DATABASES`` | The database to backup, if none is specified, it backs up all of the databases on the MySQL server |
 | ``-f`` | ``--tables`` | **YES** | ``MYSQL_TABLES`` | The tables to backup, if none is specified, it backs up all of the tables on the MySQL server |
@@ -54,12 +53,15 @@ You have this table to reference for command line options.  You can also run ``-
 | ``-x`` | ``--s3username`` | **YES** | ``S3_USER`` | The S3 username to connect with.  Depending on your IAM configuration, you may have to specify the username to connect to the bucket with.  This is not required by all providers, but some may need to have it, thus it is provided for compatibility with those providers. |
 | ``-a`` | ``--s3accesskey`` | **NO** | ``S3_ACCESSKEY`` | The S3 access key to connect with |
 | ``-k`` | ``--s3secretkey`` | **NO** | ``S3_SECRETKEY`` | The S3 secret key to connect with |
+| ``-K`` | ``--backupkeyfile`` | **NO** | ``BACKUP_KEY_FILE`` | The backup key file to use for encryption (defaults to ``~/s3dbmanager_backup.key``) |
+| ``-S`` | ``--backupkeysize`` | **NO** | ``BACKUP_KEY_SIZE`` | The backup key file size, the higher it is the more secure the encryption key is (defaults to 32) |
+| ``-O`` | ``--backupkeyoverwrite`` | **NO** | ``BACKUP_KEY_OVERWRITE`` | If specified, the backup key file will be re-generated without prompting the user (potentially dangerous) |
 | ``-w`` | ``--retentiondays`` | **YES** | ``S3_RETENTION_DAYS`` | When specifying the ``setlifecycle`` operation, this option can be provided to set the retention period of backups in days, otherwise it defaults to 7 days. |
 | ``-c`` | ``--keep`` | **YES** | ``S3_KEEP`` | When specifying the ``rotate`` operation, this option can be provided to set the number of backups to keep in the s3 bucket, otherwise it defaults to keeping 14 backup files |
 
 ### Operations
 
-This portable script contains the following mariadb / s3 operation modes which are specified by ``-o`` or ``--operation`` parameters:
+This portable script contains the following mysql / s3 operation modes which are specified by ``-o`` or ``--operation`` parameters:
 
 - ``backup`` - backup the database to the s3 bucket
 - ``rotate`` - rotate backups in the s3 bucket

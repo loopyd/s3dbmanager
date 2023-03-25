@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# s3dbmanager.sh - A portable bash script to backup / restore mariadb 
+# s3dbmanager.sh - A portable bash script to backup / restore mysql database 
 #                  to/from s3 buckets.
 #
 # Copyright (c) 2023 DeityDurg <https://www.deitydurg.net>
@@ -21,7 +21,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Parse command line arguments
-VALID_ARGS=$(getopt -o l:u:p:o:d:f:e:b:r:x:a:k:s:w:t:i:hc: --long host:,username:,password:,port:,databases:,tables:,s3endpoint:,s3bucket:,s3region:,s3username:,s3accesskey:,s3secretkey:,operation:,retentiondays:,date:,help,keep: -- "$@")
+VALID_ARGS=$(getopt -o l:u:p:o:d:f:e:b:r:x:a:k:K:OS:s:w:t:i:hc: --long host:,username:,password:,port:,databases:,tables:,s3endpoint:,s3bucket:,s3region:,s3username:,s3accesskey:,s3secretkey:,backupkeyfile:,backupoverwrite,backupkeysize:,operation:,retentiondays:,date:,help,keep: -- "$@")
 if [[ $? -ne 0 ]]; then
     exit 1;
 fi
@@ -76,6 +76,18 @@ while [ : ]; do
         S3_SECRETKEY="$2"
         shift 2
         ;;
+    -K | --backupkeyfile)
+        BACKUP_KEY_FILE="$2"
+        shift 2
+        ;;
+    -O | --backupoverwrite)
+        BACKUP_KEY_OVERWRITE="y"
+        shift
+        ;;
+    -S | --backupkeysize)
+        BACKUP_KEY_SIZE="$2"
+        shift 2
+        ;;
     -s | --operation)
         OPERATION="$2"
         shift 2
@@ -100,7 +112,8 @@ while [ : ]; do
         dousage
         exit 1
         ;;
-    --) shift; 
+    --) 
+        shift; 
         break 
         ;;
   esac
@@ -183,6 +196,24 @@ if [ -z "$S3_RETENTION_DAYS" ] && [ "$OPERATION" == "setlifecycle" ]; then
     echo "-w | --retentiondays: OPERATION=setlifecycle requires RETENTION_DAYS option, it has defaulted to 7 days" >&2
     S3_RETENTION_DAYS="7"
 fi
+# Ensure backup key file is a valid filename.
+if [ -z "${BACKUP_KEY_FILE}" ] && [ "$OPERATION" == "backup" ]; then
+    echo "-K | --backupkeyfile: OPERATION=backup requires BACKUP_KEY_FILE option, it has defaulted to $HOME/s3dbmanager_backup.key" >&2
+    BACKUP_KEY_FILE="$HOME/s3dbmanager_backup.key"
+fi
+if [ -z "${BACKUP_KEY_FILE}" ] && [ "$OPERATION" == "restore" ]; then
+    echo "-K | --backupkeyfile: OPERATION=restore requires BACKUP_KEY_FILE option, it has defaulted to $HOME/s3dbmanager_backup.key" >&2
+    BACKUP_KEY_FILE="$HOME/s3dbmanager_backup.key"
+fi
+# Ensure backup key size is set correctly.
+if [ -z "${BACKUP_KEY_SIZE}" ] && [ "$OPERATION" == "backup" ]; then
+    echo "-S | --backupkeysize: OPERATION=backup requires BACKUP_KEY_SIZE option, it has defaulted to 32" >&2
+    BACKUP_KEY_SIZE="32"
+fi
+if [ -z "${BACKUP_KEY_SIZE}" ] && [ "$OPERATION" == "restore" ]; then
+    echo "-S | --backupkeysize: OPERATION=backup requires BACKUP_KEY_SIZE option, it has defaulted to 32" >&2
+    BACKUP_KEY_SIZE="32"
+fi
 if [ -z "$MYDATE" ] && [ "$OPERATION" == "backup" ]; then
     echo "-t | --date: OPERATION=backup requires DATE option, it has defaulted to NOW" >&2
     MYDATE="$(date '+%Y%m%d-%H%M')"
@@ -238,32 +269,6 @@ docheckprerequisites() {
             exit 1
         fi
     fi
-    if ! command -v bsdtar &> /dev/null; then
-        echo "bsdtar tool could not be found, it will be installed now" >&2
-        apt-get install bsdtar -y
-        if command -v bsdtar &> /dev/null; then
-            echo "bsdtar tool installed successfully" >&2
-        else
-            echo "bsdtar tool failed to install successfully, please check the log" >&2
-            exit 1
-        fi  
-    fi
-    if ! command -v qpress &> /dev/null; then
-        echo "qpress tool could not be found, it will be installed now" >&2
-        wget -qO- 'https://github.com/PierreLvx/qpress/archive/refs/heads/master.zip' | bsdtar -xf- -C ${WORKDIR}/
-        pushd "${WORKDIR}/qpress-master" || exit 1
-        PREFIX=/usr/local/bin make -j$(nproc)
-        PREFIX=/usr/local/bin make install
-        popd || exit 1
-        rm -rf ${WORKDIR}/qpress-master
-        if command -v qpress &> /dev/null; then
-            echo "qpress tool installed successfully" >&2
-        else
-            echo "qpress tool failed to install successfully, please check the log" >&2
-            exit 1
-        fi
-        exit 1
-    fi
     return
 }
 
@@ -290,19 +295,50 @@ EOF
     return
 }
 
-# The function does a backup of the mariadb database streamed to the s3 bucket.
+# Generate a backup key to encrypt the database with
+dogeneratekey() {
+  if [ -f "${BACKUP_KEY_FILE}" ]; then
+    if [ -z "${BACKUP_KEY_OVERWRITE}" ]; then
+      read -p "WARNING: backup encryption key file already exists. ARE YOU SURE you want to overwrite it? (THIS WILL MAKE ANY PREVIOUSLY MADE BACKUPS INACCESSABLE WITHOUT THE KEY!  BEWARE)  [y/N] " answer
+      if [[ ! "${answer}" =~ ^[Yy]$ ]]; then
+        echo "Aborting backup key generation."
+        return
+      fi
+    else
+      echo "Using existing backup key file ${BACKUP_KEY_FILE}.".
+      return
+    fi
+  fi
+  
+  # Generate new backup key and save to file
+  openssl rand -out "${BACKUP_KEY_FILE}" ${BACKUP_KEY_SIZE}
+  echo "Backup encryption key generated and saved to ${BACKUP_KEY_FILE}."
+}
+
+# The function does a backup of the database streamed to the S3 bucket.
 dobackup() {
     echo "Taking a backup at ${MYDATE}..."
-    echo ${MYSQL_PARAMS}
-    mariabackup --backup --stream=xbstream ${MYSQL_PARAMS} | lbzip2 -k "${WORKDIR}/${FILENAME}"
-    s3cmd $S3CMD_PARAMS put "${WORKDIR}/${FILENAME}" "s3://${S3_BUCKET}"
+    mysqldump ${MYSQL_PARAMS} \
+    | lbzip2 -c \
+    | openssl enc -aes-256-cbc -salt -pass file:${BACKUP_KEY_FILE} \
+    | s3cmd $S3CMD_PARAMS put - "s3://${S3_BUCKET}/${FILENAME}"
     return
+}
+
+# The function performs a restore from the S3 bucket to the database.
+dorestore() {
+    systemctl stop mysqld.service
+    s3cmd $S3CMD_PARAMS get "s3://${S3_BUCKET}/${FILENAME}" \
+    | openssl enc -aes-256-cbc -d -salt -pass file:${BACKUP_KEY_FILE} \
+    | lbzip2 -d \
+    | mysql ${MYSQL_PARAMS}
+    systemctl start mysqld.service
 }
 
 dorotate() {
     echo "Rotating backups on S3 (keep $S3_KEEP latest backups)" >&2
     s3cmd ls "s3://$S3_BUCKET" \
-    | grep -e gpg$ \
+    | grep -e bz2$ \
     | awk '{print $4}' \
     | head -n -$S3_KEEP \
     | xargs s3cmd del
@@ -319,12 +355,38 @@ dobackupdaemon() {
     return
 }
 
-# The fucntion performs a restore from the s3 bucket to the database.
-dorestore() {
-    systemctl stop mysqld.service
-    s3cmd $S3CMD_PARAMS get "s3://${S3_BUCKET}/${FILENAME}" | lbzip2 -d | mbstream -x --directory=/var/lib/mysql
-    mariabackup --prepare --target-dir=/var/lib/mysql/
-    systemctl start mysqld.service
+# Function to display usage information
+dousage() {
+  echo "s3dbmanager.sh - A portable bash script to backup / restore mysql"
+  echo "                 to/from s3 buckets."
+  echo
+  echo "=== Copyright (c) 2023 DeityDurg <https://www.deitydurg.net> ==="
+  echo
+  echo "Usage: s3dbmanager.sh [options]"
+  echo
+  echo "Options:"
+  echo "  -l | --host            : MySQL host (default: localhost)"
+  echo "  -u | --username        : MySQL username"
+  echo "  -p | --password        : MySQL password"
+  echo "  -o | --port            : MySQL port (default: 3306)"
+  echo "  -d | --databases       : MySQL database(s) to backup/restore"
+  echo "  -f | --tables          : MySQL table(s) to backup/restore"
+  echo "  -e | --s3endpoint      : S3 endpoint"
+  echo "  -b | --s3bucket        : S3 bucket"
+  echo "  -r | --s3region        : S3 region"
+  echo "  -x | --s3username      : S3 username"
+  echo "  -a | --s3accesskey     : S3 access key"
+  echo "  -k | --s3secretkey     : S3 secret key"
+  echo "  -K | --backupkeyfile   : S3 backup key filename (default: $HOME/s3dbmanager_backup.key)"
+  echo "  -S | --backupkeysize   : S3 backup key size (default: 32)"
+  echo "  -O | --backupoverwrite : Overwrite the backup key file if it exists."
+  echo "  -s | --operation       : Operation to perform"
+  echo "  -w | --retentiondays   : Number of days to keep backups"
+  echo "  -t | --date            : Backup/restore date (format: YYYY-MM-DD)"
+  echo "  -i | --interval        : Time to wait between backups/restores (in seconds)"
+  echo "  -c | --keep            : Number of backups to keep in S3 (default: 14)"
+  echo "  -h | --help            : Display this script usage information"
+  return
 }
 
 # Run run functions
@@ -334,6 +396,7 @@ case "$OPERATION" in
         dosetlifecycle
         ;;
     backup)
+        dogeneratekey
         dobackup
         ;;
     rotate)
@@ -343,6 +406,7 @@ case "$OPERATION" in
         dobackupdaemon
         ;;
     restore)
+        dogeneratekey
         dorestore
         ;;
     *)
